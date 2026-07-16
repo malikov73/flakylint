@@ -6,7 +6,7 @@ import (
 )
 
 func TestSimple(t *testing.T) { // want `testfunc t`
-	t.Parallel() // want `parallel`
+	t.Parallel()                      // want `parallel`
 	t.Run("sub", func(t *testing.T) { // want `subtest t`
 	})
 }
