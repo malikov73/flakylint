@@ -1,6 +1,6 @@
 module github.com/malikov73/flakylint
 
-go 1.25
+go 1.25.0
 
 require golang.org/x/tools v0.48.0
 
