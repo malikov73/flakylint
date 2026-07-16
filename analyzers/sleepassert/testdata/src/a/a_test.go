@@ -52,3 +52,11 @@ func TestGoroutineSleep(t *testing.T) {
 func helperSleep() {
 	time.Sleep(time.Millisecond) // not a test function: silent
 }
+
+func TestLoopWrappedSubtest(t *testing.T) {
+	for i := 0; i < 2; i++ {
+		t.Run("sub", func(t *testing.T) {
+			time.Sleep(time.Millisecond) // want `time.Sleep synchronizes the test on real time`
+		})
+	}
+}
