@@ -32,6 +32,14 @@ func TestGoroutineFatal(t *testing.T) {
 	}()
 }
 
+func BenchmarkFatal(b *testing.B) {
+	log.Fatal("boom") // want `log.Fatal inside a test terminates the whole test binary and skips cleanup; use b.Fatal`
+}
+
+func BenchmarkExit(b *testing.B) {
+	os.Exit(1) // want `os.Exit inside a test terminates the whole test binary and skips cleanup; use b.Fatal or b.Skip`
+}
+
 func helper() {
 	os.Exit(1) // not a test function: silent
 }

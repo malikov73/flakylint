@@ -86,17 +86,23 @@ func run(pass *analysis.Pass) (any, error) {
 }
 
 func reportInTest(pass *analysis.Pass, call *ast.CallExpr, isExit bool, logName, tname string) {
+	// tname is the receiver we point users at; "_" (blank param) has no name
+	// to reference, so fall back to the conventional "t".
+	recv := tname
+	if recv == "_" {
+		recv = "t"
+	}
 	if isExit {
 		pass.Reportf(call.Pos(),
-			"os.Exit inside a test terminates the whole test binary and skips cleanup; use t.Fatal or t.Skip")
+			"os.Exit inside a test terminates the whole test binary and skips cleanup; use %s.Fatal or %s.Skip", recv, recv)
 		return
 	}
 	diag := analysis.Diagnostic{
 		Pos: call.Pos(),
 		End: call.End(),
 		Message: fmt.Sprintf(
-			"log.%s inside a test terminates the whole test binary and skips cleanup; use t.%s",
-			logName, fatalFuncs[logName]),
+			"log.%s inside a test terminates the whole test binary and skips cleanup; use %s.%s",
+			logName, recv, fatalFuncs[logName]),
 	}
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok && tname != "_" {
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
