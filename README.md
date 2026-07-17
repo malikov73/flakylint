@@ -4,7 +4,6 @@
 
 [![CI](https://github.com/malikov73/flakylint/actions/workflows/ci.yml/badge.svg)](https://github.com/malikov73/flakylint/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/malikov73/flakylint.svg)](https://pkg.go.dev/github.com/malikov73/flakylint)
-[![Go Report Card](https://goreportcard.com/badge/github.com/malikov73/flakylint)](https://goreportcard.com/report/github.com/malikov73/flakylint)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 ```
