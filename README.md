@@ -52,6 +52,18 @@ per check where there were more):
 pointed at code that really does what the check says it does. Full triage
 notes live in [`docs/corpus/`](docs/corpus/).
 
+Broken out by check:
+
+| Check | Findings | Triaged | Correctly flagged | False positives |
+|---|---|---|---|---|
+| `sleepassert` | 239 | 79 | 79 | **0** |
+| `httptestclose` | 24 | 24 | 24 | **0** |
+| `exitfatal` | 1 | 1 | 1 | **0** |
+| `parallelglobal` | 0 | — | — | — |
+
+`parallelglobal` produced no findings on the corpus — the pattern is rare in
+mature codebases, which is exactly why it survives review when it does appear.
+
 Some favorites the corpus run surfaced:
 
 - a Grafana test sleeping through an async DB insert, annotated by its own
@@ -61,6 +73,8 @@ Some favorites the corpus run surfaced:
 - the self-aware ten-second sleep in Kubernetes quoted above.
 
 ## The checks
+
+[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary)
 
 ### `httptestclose` — leaked httptest servers
 
@@ -163,6 +177,9 @@ Apply the suggested fixes (`httptestclose`, `exitfatal`):
 ```
 flakylint -fix ./...
 ```
+
+Add `-diff` to preview: `flakylint -fix -diff ./...` prints the rewrites as a
+unified diff without touching files, and exits 0 even when findings exist.
 
 Disable an individual check:
 
