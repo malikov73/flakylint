@@ -34,6 +34,20 @@ var fatalFuncs = map[string]string{
 
 func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+
+	// The pending-defer check is identical for every exit call inside a given
+	// TestMain, so compute it once per function rather than on each call below.
+	testMainDefer := map[*ast.FuncDecl]bool{}
+	for _, f := range pass.Files {
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil || !testfuncs.IsTestMain(pass.TypesInfo, fn) {
+				continue
+			}
+			testMainDefer[fn] = hasDirectDefer(fn.Body)
+		}
+	}
+
 	insp.WithStack([]ast.Node{(*ast.CallExpr)(nil)}, func(n ast.Node, push bool, stack []ast.Node) bool {
 		if !push {
 			return false
@@ -55,25 +69,27 @@ func run(pass *analysis.Pass) (any, error) {
 				return true
 			}
 		}
+		reportInTest := func(tname string) {
+			if isExit {
+				reportExit(pass, call, tname)
+			} else {
+				reportLogFatal(pass, call, logName, tname)
+			}
+		}
 		for i := len(stack) - 2; i >= 0; i-- {
 			switch outer := stack[i].(type) {
 			case *ast.FuncDecl:
 				if param, ok := testfuncs.TestFunc(pass.TypesInfo, outer); ok {
-					reportInTest(pass, call, isExit, logName, param.Name)
-				} else if testfuncs.IsTestMain(pass.TypesInfo, outer) && hasDirectDefer(outer.Body) {
-					callName := "os.Exit"
-					if !isExit {
-						callName = "log." + logName
-					}
-					pass.Reportf(call.Pos(),
-						"%s in TestMain skips the function's pending defers; run cleanup before exiting or move it into m.Run setup/teardown", callName)
+					reportInTest(param.Name)
+				} else if testMainDefer[outer] {
+					reportTestMain(pass, call, isExit, logName)
 				}
 				return true
 			case *ast.FuncLit:
 				if i > 0 {
 					if parent, ok := stack[i-1].(*ast.CallExpr); ok {
 						if _, param, ok := testfuncs.SubtestLit(pass.TypesInfo, parent); ok {
-							reportInTest(pass, call, isExit, logName, param.Name)
+							reportInTest(param.Name)
 						}
 					}
 				}
@@ -85,24 +101,31 @@ func run(pass *analysis.Pass) (any, error) {
 	return nil, nil
 }
 
-func reportInTest(pass *analysis.Pass, call *ast.CallExpr, isExit bool, logName, tname string) {
-	// tname is the receiver we point users at; "_" (blank param) has no name
-	// to reference, so fall back to the conventional "t".
-	recv := tname
-	if recv == "_" {
-		recv = "t"
+// receiver is the method receiver to point users at; the blank param "_" has
+// no name to reference, so fall back to the conventional "t".
+func receiver(tname string) string {
+	if tname == "_" {
+		return "t"
 	}
-	if isExit {
-		pass.Reportf(call.Pos(),
-			"os.Exit inside a test terminates the whole test binary and skips cleanup; use %s.Fatal or %s.Skip", recv, recv)
-		return
-	}
+	return tname
+}
+
+// reportExit flags an os.Exit call inside a test body or subtest.
+func reportExit(pass *analysis.Pass, call *ast.CallExpr, tname string) {
+	recv := receiver(tname)
+	pass.Reportf(call.Pos(),
+		"os.Exit inside a test terminates the whole test binary and skips cleanup; use %s.Fatal or %s.Skip", recv, recv)
+}
+
+// reportLogFatal flags a log.Fatal* call inside a test body or subtest and,
+// when the receiver has a usable name, offers to rewrite it to the t.Fatal* form.
+func reportLogFatal(pass *analysis.Pass, call *ast.CallExpr, logName, tname string) {
 	diag := analysis.Diagnostic{
 		Pos: call.Pos(),
 		End: call.End(),
 		Message: fmt.Sprintf(
 			"log.%s inside a test terminates the whole test binary and skips cleanup; use %s.%s",
-			logName, recv, fatalFuncs[logName]),
+			logName, receiver(tname), fatalFuncs[logName]),
 	}
 	if sel, ok := call.Fun.(*ast.SelectorExpr); ok && tname != "_" {
 		diag.SuggestedFixes = []analysis.SuggestedFix{{
@@ -115,6 +138,16 @@ func reportInTest(pass *analysis.Pass, call *ast.CallExpr, isExit bool, logName,
 		}}
 	}
 	pass.Report(diag)
+}
+
+// reportTestMain flags an exit call that skips TestMain's own pending defers.
+func reportTestMain(pass *analysis.Pass, call *ast.CallExpr, isExit bool, logName string) {
+	callName := "os.Exit"
+	if !isExit {
+		callName = "log." + logName
+	}
+	pass.Reportf(call.Pos(),
+		"%s in TestMain skips the function's pending defers; run cleanup before exiting or move it into m.Run setup/teardown", callName)
 }
 
 // hasDirectDefer reports whether body contains a defer statement outside

@@ -73,14 +73,18 @@ func SubtestLit(info *types.Info, call *ast.CallExpr) (*ast.FuncLit, *ast.Ident,
 	return lit, params.List[0].Names[0], true
 }
 
+// calleeFunc returns the function that call statically resolves to, or nil
+// for dynamic/interface calls and conversions.
+func calleeFunc(info *types.Info, call *ast.CallExpr) *types.Func {
+	fn, _ := typeutil.Callee(info, call).(*types.Func)
+	return fn
+}
+
 // IsPkgFunc reports whether call invokes the package-level function
 // pkgPath.name (e.g. "os".Exit).
 func IsPkgFunc(info *types.Info, call *ast.CallExpr, pkgPath, name string) bool {
-	fn, _ := typeutil.Callee(info, call).(*types.Func)
-	if fn == nil {
-		return false
-	}
-	if fn.Name() != name || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath {
+	fn := calleeFunc(info, call)
+	if fn == nil || fn.Name() != name || fn.Pkg() == nil || fn.Pkg().Path() != pkgPath {
 		return false
 	}
 	sig, ok := fn.Type().(*types.Signature)
@@ -91,7 +95,7 @@ func IsPkgFunc(info *types.Info, call *ast.CallExpr, pkgPath, name string) bool 
 // receiver type is declared in package "testing" (covers *testing.T,
 // *testing.B, and methods promoted from the embedded testing.common).
 func IsTestingMethod(info *types.Info, call *ast.CallExpr, name string) bool {
-	fn, _ := typeutil.Callee(info, call).(*types.Func)
+	fn := calleeFunc(info, call)
 	if fn == nil || fn.Name() != name || fn.Pkg() == nil || fn.Pkg().Path() != "testing" {
 		return false
 	}
