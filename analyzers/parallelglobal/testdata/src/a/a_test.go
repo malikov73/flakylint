@@ -21,7 +21,7 @@ func TestParallelWrite(t *testing.T) {
 func TestParallelCompound(t *testing.T) {
 	t.Parallel()
 	counter += 1   // want `parallel test writes package-level variable "counter"`
-	counter++      // want `parallel test writes package-level variable "counter"`
+	counter++      // collapsed: counter already reported at the first write above
 	state["k"] = 1 // want `parallel test writes package-level variable "state"`
 	b.Counter = 2  // want `parallel test writes package-level variable "Counter"`
 }

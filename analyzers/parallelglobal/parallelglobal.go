@@ -85,6 +85,9 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 		return
 	}
 
+	// One diagnostic per variable: the first write in source order is
+	// reported, later writes to the same var in this unit are collapsed.
+	reported := map[types.Object]bool{}
 	ast.Inspect(body, func(n ast.Node) bool {
 		if skipNested(n) {
 			return false
@@ -95,20 +98,21 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 				return true // := always declares locals
 			}
 			for _, lhs := range st.Lhs {
-				reportGlobalWrite(pass, lhs)
+				reportGlobalWrite(pass, lhs, reported)
 			}
 		case *ast.IncDecStmt:
-			reportGlobalWrite(pass, st.X)
+			reportGlobalWrite(pass, st.X, reported)
 		}
 		return true
 	})
 }
 
-func reportGlobalWrite(pass *analysis.Pass, target ast.Expr) {
+func reportGlobalWrite(pass *analysis.Pass, target ast.Expr, reported map[types.Object]bool) {
 	obj := targetObj(pass.TypesInfo, target)
-	if obj == nil || !isGlobalVar(obj) {
+	if obj == nil || !isGlobalVar(obj) || reported[obj] {
 		return
 	}
+	reported[obj] = true
 	pass.Reportf(target.Pos(),
 		"parallel test writes package-level variable %q; parallel tests sharing state race with each other", obj.Name())
 }
