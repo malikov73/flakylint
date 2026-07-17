@@ -204,9 +204,10 @@ tools — flakylint prevents the patterns those tools would later catch.
 ## Roadmap
 
 - map-iteration-order dependent assertions
-- unclosed `resp.Body` in tests
-- timeout contexts in parallel subtests
-- goleak coverage check
+- hardcoded listen ports in tests (`:8080` → `:0`)
+- side effects inside `require.Eventually` / polling callbacks
+- `time.Now()` used as an expected value in assertions
+- static goroutine-leak check (complementing runtime [goleak](https://github.com/uber-go/goleak))
 - minimum-duration threshold option for `sleepassert`
 - golangci-lint integration
 
