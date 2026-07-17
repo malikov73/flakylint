@@ -43,6 +43,10 @@ func run(pass *analysis.Pass) (any, error) {
 		if !testfuncs.InTestFile(pass, assign) {
 			return false
 		}
+		// Only single-value defines (srv := httptest.NewServer(...)) are
+		// tracked. Multi-value defines such as `srv, err := newServer(...)`
+		// are a known false negative: pairing each LHS with its RHS is not
+		// worth the complexity for a shape that is rare in practice.
 		if assign.Tok != token.DEFINE || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
 			return true
 		}

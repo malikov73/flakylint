@@ -13,5 +13,5 @@ func TestAnalyzer(t *testing.T) {
 }
 
 func TestSuggestedFix(t *testing.T) {
-	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), httptestclose.Analyzer, "fix")
+	analysistest.RunWithSuggestedFixes(t, analysistest.TestData(), httptestclose.Analyzer, "fix", "fixnested")
 }
