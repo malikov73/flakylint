@@ -189,6 +189,19 @@ flakylint only ever reports on `_test.go` files, so it is safe to run over
 your whole module. Exit code is non-zero when findings are reported —
 CI-gate friendly.
 
+### Suppressing a finding
+
+Silence a specific finding with a `//nolint` comment on the reported line or
+the line directly above it:
+
+```go
+time.Sleep(10 * time.Millisecond) //nolint:sleepassert // waiting on a real socket
+```
+
+The name after the colon is the check name (`httptestclose`, `sleepassert`,
+`parallelglobal`, `exitfatal`); list several comma-separated to silence more
+than one. A bare `//nolint` suppresses every check on that line.
+
 ## Design philosophy
 
 **When in doubt, stay silent.** A linter earns trust by being right, not by

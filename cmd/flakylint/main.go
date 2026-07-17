@@ -8,13 +8,14 @@ import (
 	"github.com/malikov73/flakylint/analyzers/httptestclose"
 	"github.com/malikov73/flakylint/analyzers/parallelglobal"
 	"github.com/malikov73/flakylint/analyzers/sleepassert"
+	"github.com/malikov73/flakylint/internal/nolint"
 )
 
 func main() {
 	multichecker.Main(
-		exitfatal.Analyzer,
-		httptestclose.Analyzer,
-		parallelglobal.Analyzer,
-		sleepassert.Analyzer,
+		nolint.Wrap(exitfatal.Analyzer),
+		nolint.Wrap(httptestclose.Analyzer),
+		nolint.Wrap(parallelglobal.Analyzer),
+		nolint.Wrap(sleepassert.Analyzer),
 	)
 }
