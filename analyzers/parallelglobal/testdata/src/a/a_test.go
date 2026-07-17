@@ -7,10 +7,14 @@ import (
 	"b"
 )
 
+type config struct{ n int }
+
 var (
 	counter int
 	state   = map[string]int{}
 	mu      sync.Mutex
+	global  config
+	ptr     *int
 )
 
 func TestParallelWrite(t *testing.T) {
@@ -49,6 +53,21 @@ func TestParallelParentSequentialChild(t *testing.T) {
 	t.Run("sub", func(t *testing.T) {
 		counter = 4 // documented false negative: subtest unit is not itself parallel
 	})
+}
+
+func TestParallelFieldWrite(t *testing.T) {
+	t.Parallel()
+	global.n = 1 // want `parallel test writes package-level variable "global"`
+}
+
+func TestParallelPtrDeref(t *testing.T) {
+	t.Parallel()
+	*ptr = 1 // want `parallel test writes package-level variable "ptr"`
+}
+
+func TestParallelParenLValue(t *testing.T) {
+	t.Parallel()
+	(counter) = 1 // want `parallel test writes package-level variable "counter"`
 }
 
 func TestMutexStillFlagged(t *testing.T) {
