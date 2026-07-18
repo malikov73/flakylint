@@ -71,6 +71,16 @@ func TestNestedSubtest(t *testing.T) {
 	})
 }
 
+func TestNestedGoroutine(t *testing.T) {
+	attempts := 0
+	require.Eventually(t, func() bool {
+		go func() {
+			attempts++ // want `this write to "attempts" makes test state depend on the poll count`
+		}()
+		return attempts > 3
+	}, time.Second, 10*time.Millisecond)
+}
+
 // --- silent ----------------------------------------------------------------
 
 func TestLocalOnly(t *testing.T) {
@@ -80,6 +90,17 @@ func TestLocalOnly(t *testing.T) {
 		total := 0
 		total += n
 		return total == 3
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestNestedLocalOnly(t *testing.T) {
+	require.Eventually(t, func() bool {
+		go func() {
+			acc := 0
+			acc++
+			_ = acc
+		}()
+		return true
 	}, time.Second, 10*time.Millisecond)
 }
 
