@@ -64,8 +64,13 @@ Broken out by check:
 `parallelglobal` produced no findings on the corpus — the pattern is rare in
 mature codebases, which is exactly why it survives review when it does appear.
 
-`hardport` is new in v0.2.0 and is not yet part of these published numbers;
-the corpus is refreshed before the v0.2.0 tag.
+The three v0.2.0 checks (`hardport`, `maporder`, `eventuallyeffect`) went
+through the same gate before release: the first corpus pass caught 3 false
+positives, both offending rules were narrowed (plain last-write-wins captures
+and per-iteration accumulators are now silent by design), and the re-run
+reports **zero findings and zero false positives** across all four repos —
+mature suites already do what these checks demand, which is the point. Full
+write-up: [`docs/corpus/2026-07-18-corpus-v020.md`](docs/corpus/2026-07-18-corpus-v020.md).
 
 Some favorites the corpus run surfaced:
 
