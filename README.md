@@ -77,7 +77,7 @@ Some favorites the corpus run surfaced:
 
 ## The checks
 
-[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary) · [`hardport`](#hardport--hardcoded-ports-in-tests) · [`maporder`](#maporder--asserting-on-map-iteration-order)
+[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary) · [`hardport`](#hardport--hardcoded-ports-in-tests) · [`maporder`](#maporder--asserting-on-map-iteration-order) · [`eventuallyeffect`](#eventuallyeffect--side-effects-in-polling-callbacks)
 
 ### `httptestclose` — leaked httptest servers
 
@@ -220,6 +220,43 @@ returned, reassigned, address-taken, captured by a nested closure, or mixed
 with appends from outside the loop. No autofix: choosing between sorting and
 `ElementsMatch` is a semantic call only the author can make.
 
+### `eventuallyeffect` — side effects in polling callbacks
+
+```go
+require.Eventually(t, func() bool {
+	resp, _ := http.Post(url, "application/json", body) // ← re-sent every tick
+	attempts++                                          // ← mutates outer state
+	return resp.StatusCode == http.StatusOK
+}, time.Second, 10*time.Millisecond)
+```
+
+testify's `Eventually`/`Never`/`EventuallyWithT` retry their condition callback
+until it passes — an **unpredictable** number of times that depends on machine
+speed and scheduling. A callback that mutates state shared with the test makes
+the outcome depend on that poll count: `attempts` ends up holding however many
+ticks happened to fit on this run. The condition must be a pure observation —
+act once, then poll on a read-only predicate, or assert on captured results
+after `Eventually` returns:
+
+```go
+resp, _ := http.Post(url, "application/json", body) // act once
+require.Eventually(t, func() bool {
+	return ready(resp) // pure observation
+}, time.Second, 10*time.Millisecond)
+```
+
+Flags, inside the callback of `assert`/`require` `Eventually`, `Eventuallyf`,
+`Never`, `Neverf`, `EventuallyWithT`, and `EventuallyWithTf` (package-level
+form), a direct write to a captured or package-level variable (`x = ...`, `x++`,
+`x = append(x, ...)`) and any channel send. Stays silent for variables declared
+inside the callback, the blank identifier, and — a deliberate v1 boundary —
+keyed or field writes through a captured map, slice, or pointer (`m[k] = v`,
+`p.f = v`), which are common in idempotent polling. Method calls (HTTP/DB
+effects, mutex, `t.Log`, the `*assert.CollectT` of `EventuallyWithT`) are out of
+scope in v1. No autofix. This ports testing-library's
+[`no-wait-for-side-effects`](https://github.com/testing-library/eslint-plugin-testing-library/blob/main/docs/rules/no-wait-for-side-effects.md)
+idea to Go.
+
 ## Install
 
 ```
@@ -281,7 +318,8 @@ time.Sleep(10 * time.Millisecond) //nolint:sleepassert // waiting on a real sock
 ```
 
 The name after the colon is the check name (`httptestclose`, `sleepassert`,
-`parallelglobal`, `exitfatal`, `hardport`, `maporder`); list several
+`parallelglobal`, `exitfatal`, `hardport`, `maporder`, `eventuallyeffect`);
+list several
 comma-separated to silence more than one. A bare `//nolint` suppresses every
 check on that line.
 
@@ -299,7 +337,6 @@ tools — flakylint prevents the patterns those tools would later catch.
 
 ## Roadmap
 
-- side effects inside `require.Eventually` / polling callbacks
 - `time.Now()` used as an expected value in assertions
 - static goroutine-leak check (complementing runtime [goleak](https://github.com/uber-go/goleak))
 - minimum-duration threshold option for `sleepassert`
