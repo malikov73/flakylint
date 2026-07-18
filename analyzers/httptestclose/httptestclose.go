@@ -157,26 +157,52 @@ func enclosingTestParam(info *types.Info, stack []ast.Node) string {
 }
 
 func report(pass *analysis.Pass, assign *ast.AssignStmt, id *ast.Ident, stack []ast.Node) {
-	indent := strings.Repeat("\t", max(0, pass.Fset.Position(assign.Pos()).Column-1))
-	var fixText, fixMsg string
-	if tname := enclosingTestParam(pass.TypesInfo, stack); tname != "" && tname != "_" {
-		fixText = "\n" + indent + tname + ".Cleanup(" + id.Name + ".Close)"
-		fixMsg = "register " + id.Name + ".Close with " + tname + ".Cleanup"
-	} else {
-		fixText = "\n" + indent + "defer " + id.Name + ".Close()"
-		fixMsg = "defer " + id.Name + ".Close()"
-	}
-	pass.Report(analysis.Diagnostic{
+	diag := analysis.Diagnostic{
 		Pos:     assign.Pos(),
 		End:     assign.End(),
 		Message: "httptest server is never closed; the leaked port and goroutines can make later tests flaky",
-		SuggestedFixes: []analysis.SuggestedFix{{
+	}
+	// A cleanup statement can only be inserted after a standalone assignment.
+	// When the constructor lives in an if/for/switch initializer, appending a
+	// statement would splice it into the clause header and break the file, so
+	// keep the diagnostic but offer no fix.
+	if isStandaloneAssign(assign, stack) {
+		indent := strings.Repeat("\t", max(0, pass.Fset.Position(assign.Pos()).Column-1))
+		var fixText, fixMsg string
+		if tname := enclosingTestParam(pass.TypesInfo, stack); tname != "" && tname != "_" {
+			fixText = "\n" + indent + tname + ".Cleanup(" + id.Name + ".Close)"
+			fixMsg = "register " + id.Name + ".Close with " + tname + ".Cleanup"
+		} else {
+			fixText = "\n" + indent + "defer " + id.Name + ".Close()"
+			fixMsg = "defer " + id.Name + ".Close()"
+		}
+		diag.SuggestedFixes = []analysis.SuggestedFix{{
 			Message: fixMsg,
 			TextEdits: []analysis.TextEdit{{
 				Pos:     assign.End(),
 				End:     assign.End(),
 				NewText: []byte(fixText),
 			}},
-		}},
-	})
+		}}
+	}
+	pass.Report(diag)
+}
+
+// isStandaloneAssign reports whether assign is a statement in the innermost
+// enclosing block's list (as opposed to the init clause of an if/for/switch),
+// where inserting a follow-up cleanup statement is syntactically safe.
+func isStandaloneAssign(assign *ast.AssignStmt, stack []ast.Node) bool {
+	if len(stack) < 2 {
+		return false
+	}
+	block, ok := stack[len(stack)-2].(*ast.BlockStmt)
+	if !ok {
+		return false
+	}
+	for _, stmt := range block.List {
+		if stmt == assign {
+			return true
+		}
+	}
+	return false
 }

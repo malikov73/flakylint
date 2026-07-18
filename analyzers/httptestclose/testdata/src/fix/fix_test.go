@@ -9,3 +9,9 @@ func TestFix(t *testing.T) {
 	srv := httptest.NewServer(nil) // want `httptest server is never closed`
 	_ = srv.URL
 }
+
+func TestInitializer(t *testing.T) {
+	if srv := httptest.NewServer(nil); srv.URL != "" { // want `httptest server is never closed`
+		_ = srv.URL
+	}
+}

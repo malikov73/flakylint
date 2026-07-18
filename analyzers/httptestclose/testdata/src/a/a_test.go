@@ -62,3 +62,11 @@ func TestSubtestLeak(t *testing.T) {
 		_ = srv.URL
 	})
 }
+
+func TestInitializer(t *testing.T) {
+	// Constructor in an if-initializer: still diagnosed, but no fix is offered
+	// because a cleanup statement cannot be spliced into the clause header.
+	if srv := httptest.NewServer(nil); srv.URL != "" { // want `httptest server is never closed`
+		_ = srv.URL
+	}
+}
