@@ -2,7 +2,7 @@
 //
 // Synchronizing a test on real time races the goroutine scheduler and the
 // CI machine's load; such tests pass locally and flake under CI pressure.
-// Prefer testing/synctest (Go 1.24+) or explicit synchronization.
+// Prefer testing/synctest (Go 1.25+) or explicit synchronization.
 package sleepassert
 
 import (
@@ -24,7 +24,7 @@ var Analyzer = &analysis.Analyzer{
 	Run:      run,
 }
 
-const msg = "time.Sleep synchronizes the test on real time and flakes under CI load; use testing/synctest (Go 1.24+) or explicit synchronization (channel, sync.WaitGroup)"
+const msg = "time.Sleep synchronizes the test on real time and flakes under CI load; use testing/synctest (Go 1.25+) or explicit synchronization (channel, sync.WaitGroup)"
 
 func run(pass *analysis.Pass) (any, error) {
 	insp := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
