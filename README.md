@@ -185,10 +185,13 @@ addr := ln.Addr().String() // ← kernel-assigned free port
 
 or let `httptest.NewServer` pick the port for you.
 
-Flags `net.Listen` / `net.ListenPacket`, `http.ListenAndServe` /
-`ListenAndServeTLS`, and `http.Server{Addr: ...}` literals. Stays silent for
-named ports (`":http"`), computed addresses (`fmt.Sprintf`), unix sockets,
-the wildcard port `":0"`, and Dial-side literals — those are not the bug.
+Flags `net.Listen` / `net.ListenPacket` (only for a constant `tcp*`/`udp*`
+network) and `http.ListenAndServe` / `ListenAndServeTLS`. Stays silent for
+named ports (`":http"`), computed addresses (`fmt.Sprintf`), unix sockets and
+other non-port networks, non-constant networks, out-of-range ports, the
+wildcard port `":0"`, and Dial-side literals — those are not the bug. An
+`http.Server{Addr: ...}` literal is a config object, not a bind call, so it is
+not flagged.
 
 ### `maporder` — asserting on map iteration order
 
