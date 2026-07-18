@@ -9,7 +9,7 @@
 ```
 $ flakylint ./...
 worker_test.go:24:2: time.Sleep synchronizes the test on real time and flakes
-    under CI load; use testing/synctest (Go 1.24+) or explicit synchronization
+    under CI load; use testing/synctest (Go 1.25+) or explicit synchronization
     (channel, sync.WaitGroup)
 server_test.go:31:2: httptest server is never closed; the leaked port and
     goroutines can make later tests flaky
@@ -35,7 +35,7 @@ linter — the same machinery as `go vet`. It is the missing static half of
 your flaky-test strategy. Use it *alongside* your runtime tooling, not
 instead of it.
 
-## Field-tested
+## Corpus evaluation
 
 Before the first release we ran flakylint against four large open-source
 codebases and hand-triaged every reported finding (or a random sample of 25
@@ -48,9 +48,11 @@ per check where there were more):
 | prometheus/prometheus | 26 | 26 | 26 | **0** |
 | testcontainers-go | 4 | 4 | 4 | **0** |
 
-**0 false positives across 104 hand-checked findings.** Every diagnostic
-pointed at code that really does what the check says it does. Full triage
-notes live in [`docs/corpus/`](docs/corpus/).
+**0 rule misclassifications across 104 reviewed findings — 52 actionable, 52
+technically correct but low-value.** Every diagnostic pointed at code that
+really does what the check says it does; whether that code is worth changing is
+a separate, human call. Full triage notes live in
+[`docs/corpus/`](docs/corpus/).
 
 Broken out by check:
 
@@ -65,12 +67,17 @@ Broken out by check:
 mature codebases, which is exactly why it survives review when it does appear.
 
 The three v0.2.0 checks (`hardport`, `maporder`, `eventuallyeffect`) went
-through the same gate before release: the first corpus pass caught 3 false
-positives, both offending rules were narrowed (plain last-write-wins captures
-and per-iteration accumulators are now silent by design), and the re-run
-reports **zero findings and zero false positives** across all four repos —
-mature suites already do what these checks demand, which is the point. Full
-write-up: [`docs/corpus/2026-07-18-corpus-v020.md`](docs/corpus/2026-07-18-corpus-v020.md).
+through the same gate before release. The first corpus pass caught 3 rule
+misclassifications, and both offending rules were narrowed (plain
+last-write-wins captures and per-iteration accumulators are now silent by
+design). A large batch of grafana `eventuallyeffect` hits were correct under
+the old rule but idiomatic noise — that signal is what drove the narrowing. On
+the re-run the narrowed checks add **no findings** across all four repos: a
+compatibility result — mature suites already hold ports on `:0`, sort before
+asserting, and keep polling callbacks pure — verified against synthetic
+positive controls, not a claim about how often the checks fire in the wild.
+Full write-up:
+[`docs/corpus/2026-07-18-corpus-v020.md`](docs/corpus/2026-07-18-corpus-v020.md).
 
 Some favorites the corpus run surfaced:
 
@@ -117,9 +124,10 @@ func TestWorker(t *testing.T) {
 
 A sleep that "waits for the goroutine" is a bet that the CI runner is as
 fast as your laptop. It loses under load. The diagnostic points you to
-[`testing/synctest`](https://go.dev/blog/synctest) (Go 1.24+), which makes
+[`testing/synctest`](https://go.dev/blog/synctest) (Go 1.25+), which makes
 such tests deterministic *and* instant, or to plain channel/WaitGroup
-synchronization.
+synchronization. `testing/synctest` is stable since Go 1.25; earlier releases
+shipped it only as a `GOEXPERIMENT`, with a different API.
 
 Stays silent for sleeps inside polling/retry loops, inside `synctest`
 bubbles, in goroutines and helpers, and for `time.Sleep(0)`. This is the
@@ -138,10 +146,13 @@ func TestIncrement(t *testing.T) {
 }
 ```
 
-`t.Parallel()` plus a package-level variable write is a data race that only
-manifests under particular schedules — the definition of a flake. The write
-is flagged whether or not a mutex guards it: two parallel tests mutating
-shared state generally break each other's assumptions either way.
+`t.Parallel()` plus a package-level variable write couples tests that are
+supposed to be independent: what one test observes now depends on how the
+scheduler interleaves it with every other parallel test in the package — the
+definition of a flake. The write is flagged whether or not a mutex guards it. A
+lock removes the memory race but not the logical cross-test interference and
+order-dependence, so two parallel tests mutating shared state generally break
+each other's assumptions either way.
 
 ### `exitfatal` — killing the test binary
 
@@ -161,7 +172,10 @@ poisoning every test that follows. In `TestMain`, `os.Exit(m.Run())` is
 flagged only when the function has pending `defer`s that it would silently
 skip.
 
-**Autofix** (`-fix`): rewrites `log.Fatal*` → `t.Fatal*`.
+**Autofix** (`-fix`): rewrites `log.Fatal*` → `t.Fatal*` — except where the
+test's receiver name is shadowed at the call site, where the finding stands but
+the rewrite is withheld (the diagnostic then asks you to route the failure
+through the test's `*testing.T` rather than naming `t.Fatal` as the drop-in).
 
 ### `hardport` — hardcoded ports in tests
 
@@ -189,9 +203,7 @@ Flags `net.Listen` / `net.ListenPacket` (only for a constant `tcp*`/`udp*`
 network) and `http.ListenAndServe` / `ListenAndServeTLS`. Stays silent for
 named ports (`":http"`), computed addresses (`fmt.Sprintf`), unix sockets and
 other non-port networks, non-constant networks, out-of-range ports, the
-wildcard port `":0"`, and Dial-side literals — those are not the bug. An
-`http.Server{Addr: ...}` literal is a config object, not a bind call, so it is
-not flagged.
+wildcard port `":0"`, and Dial-side literals — those are not the bug.
 
 ### `maporder` — asserting on map iteration order
 
@@ -205,10 +217,10 @@ func TestKeys(t *testing.T) {
 }
 ```
 
-The Go runtime **deliberately** randomizes map iteration order on every run,
-so a slice or string built by ranging over a map has no stable order. An
-order-sensitive assertion against a fixed expected value passes only when the
-random order happens to line up — the test can go green for months and then
+The Go spec leaves map iteration order **unspecified**, and the runtime varies
+it between runs, so a slice or string built by ranging over a map has no stable
+order. An order-sensitive assertion against a fixed expected value passes only
+when the order happens to line up — the test can go green for months and then
 flake for no visible reason. Sort the accumulator first, or assert
 order-insensitively:
 
@@ -236,8 +248,8 @@ call only the author can make.
 
 ```go
 require.Eventually(t, func() bool {
-	resp, _ := http.Post(url, "application/json", body) // ← re-sent every tick
-	attempts++                                          // ← mutates outer state
+	resp, _ := http.Post(url, "application/json", body)
+	attempts++                                          // ← grows with the poll count
 	return resp.StatusCode == http.StatusOK
 }, time.Second, 10*time.Millisecond)
 ```
@@ -318,13 +330,26 @@ In GitHub Actions:
 ```yaml
 - name: flakylint
   run: |
-    go install github.com/malikov73/flakylint/cmd/flakylint@latest
+    # pin a release in CI; @latest suits interactive install only
+    go install github.com/malikov73/flakylint/cmd/flakylint@v0.2.0
     flakylint ./...
 ```
 
 flakylint only ever reports on `_test.go` files, so it is safe to run over
-your whole module. Exit code is non-zero when findings are reported —
-CI-gate friendly.
+your whole module. The exit code depends on how you invoke it:
+
+| Invocation | With findings | Exit code |
+|---|---|---|
+| `flakylint ./...` (text) | yes | `3` |
+| `flakylint ./...` (text) | none | `0` |
+| `flakylint -json ./...` | yes | `0` |
+| `flakylint -fix ./...` | yes | `0` |
+| `flakylint -fix -diff ./...` | yes | `0` |
+| `go vet -vettool=$(which flakylint) ./...` | yes | `1` |
+
+Treat the text mode's non-zero exit (`3`) as the CI gate. The `-json` and
+`-fix` modes exit `0` even with findings so they compose with other tooling,
+and under `go vet` the standard vet exit code (`1`) applies.
 
 ### Suppressing a finding
 
@@ -347,7 +372,7 @@ check on that line.
 being loud. Every check ships with explicit silence heuristics (escaping
 servers, polling loops, synctest bubbles, goroutine literals, canonical
 `TestMain` patterns), and each heuristic is locked in by regression tests.
-The 0-FP corpus result above is this philosophy, measured.
+The 0-misclassification corpus result above is this philosophy, measured.
 
 flakylint deliberately does **not** try to detect flakiness at runtime.
 Retries, quarantine and scoring are a different job, done well by other
