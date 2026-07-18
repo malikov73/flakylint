@@ -2,6 +2,9 @@ version: 2
 project_name: flakylint
 builds:
   - main: ./cmd/flakylint
+    # Version output relies on goreleaser's DEFAULT ldflags
+    # (-X main.version/main.commit/main.date). If you ever add a custom
+    # ldflags block here, keep those -X flags or `flakylint version` breaks.
     env:
       - CGO_ENABLED=0
     goos: [linux, darwin, windows]
