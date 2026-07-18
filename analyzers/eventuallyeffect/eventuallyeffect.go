@@ -14,11 +14,21 @@
 // This is a Go port of the idea behind testing-library's
 // no-wait-for-side-effects rule.
 //
-// v1 is deliberately narrow. It flags only two shapes inside the callback:
+// v1 is deliberately narrow. It flags only count-dependent effects inside the
+// callback — those whose result changes with the number of poll ticks:
 //
-//   - a direct write to a variable declared outside the callback (a captured
-//     local or a package-level var): x = ..., x++, x += ..., x = append(x, ...);
+//   - an increment or decrement of a variable declared outside the callback (a
+//     captured local or a package-level var): x++, x--;
+//   - a compound assignment to such a variable: x += ..., x |= ..., etc.;
+//   - a self-append that grows such a variable: x = append(x, ...);
 //   - a channel send: ch <- v.
+//
+// A plain overwrite (x = v, including multi-assign a, b = f()) is silent. It is
+// last-write-wins: re-running it each tick leaves the same final value, so it
+// is the idiomatic way to capture the result of the final successful tick and
+// does not make the outcome depend on the poll count. Flagging it produced
+// false positives on real code (prometheus/prometheus), so plain overwrites are
+// a deliberate boundary.
 //
 // Writes through a captured pointer, map, or slice element (p.f = v, m[k] = v,
 // s[0] = v) stay silent: keyed or idempotent writes into a shared cache are a
@@ -30,6 +40,7 @@ package eventuallyeffect
 
 import (
 	"go/ast"
+	"go/token"
 	"go/types"
 
 	"golang.org/x/tools/go/analysis"
@@ -41,7 +52,7 @@ import (
 
 var Analyzer = &analysis.Analyzer{
 	Name:     "eventuallyeffect",
-	Doc:      "reports side effects (captured writes, channel sends) inside testify Eventually-style polling callbacks; the callback runs an unpredictable number of times, so such effects make tests flake",
+	Doc:      "reports count-dependent side effects (increments, compound assignments, self-appends, channel sends) inside testify Eventually-style polling callbacks; the callback runs an unpredictable number of times, so such effects make tests flake",
 	URL:      "https://github.com/malikov73/flakylint",
 	Requires: []*analysis.Analyzer{inspect.Analyzer},
 	Run:      run,
@@ -107,9 +118,9 @@ func isPollCall(info *types.Info, call *ast.CallExpr) bool {
 	return false
 }
 
-// checkCondition reports captured writes and channel sends anywhere inside the
-// callback body, including nested function literals (a goroutine spawned per
-// tick is just as nondeterministic).
+// checkCondition reports count-dependent writes and channel sends anywhere
+// inside the callback body, including nested function literals (a goroutine
+// spawned per tick is just as nondeterministic).
 func checkCondition(pass *analysis.Pass, lit *ast.FuncLit) {
 	ast.Inspect(lit.Body, func(n ast.Node) bool {
 		switch st := n.(type) {
@@ -118,12 +129,65 @@ func checkCondition(pass *analysis.Pass, lit *ast.FuncLit) {
 		case *ast.IncDecStmt:
 			reportCapturedWrite(pass, lit, st.X)
 		case *ast.AssignStmt:
-			for _, lhs := range st.Lhs {
-				reportCapturedWrite(pass, lit, lhs)
-			}
+			checkAssign(pass, lit, st)
 		}
 		return true
 	})
+}
+
+// checkAssign reports only count-dependent assignments to captured variables.
+// A compound assignment (x += ..., x |= ...) accumulates across ticks; a
+// self-append (x = append(x, ...)) grows the target by one element per tick.
+// A plain overwrite (x = v, a, b = f()) is last-write-wins and stays silent —
+// the deliberate boundary documented on the package. A := declares a fresh
+// local inside the callback and never writes captured state.
+func checkAssign(pass *analysis.Pass, lit *ast.FuncLit, st *ast.AssignStmt) {
+	switch {
+	case st.Tok == token.DEFINE:
+		return
+	case st.Tok != token.ASSIGN:
+		for _, lhs := range st.Lhs {
+			reportCapturedWrite(pass, lit, lhs)
+		}
+	default:
+		for i, lhs := range st.Lhs {
+			if i < len(st.Rhs) && isSelfAppend(pass.TypesInfo, lhs, st.Rhs[i]) {
+				reportCapturedWrite(pass, lit, lhs)
+			}
+		}
+	}
+}
+
+// isSelfAppend reports whether rhs is a builtin append(...) that includes lhs
+// among its arguments, i.e. the "grow lhs by appending to it" idiom. The lhs
+// ident may appear as any argument, including a variadic spread (append(x, xs...)
+// or append(prefix, x...)), so all arguments are checked.
+func isSelfAppend(info *types.Info, lhs, rhs ast.Expr) bool {
+	id, ok := lhs.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	call, ok := rhs.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	fn, ok := call.Fun.(*ast.Ident)
+	if !ok || fn.Name != "append" {
+		return false
+	}
+	if _, ok := info.ObjectOf(fn).(*types.Builtin); !ok {
+		return false // append shadowed by a local of the same name
+	}
+	target := info.ObjectOf(id)
+	if target == nil {
+		return false
+	}
+	for _, arg := range call.Args {
+		if argID, ok := arg.(*ast.Ident); ok && info.ObjectOf(argID) == target {
+			return true
+		}
+	}
+	return false
 }
 
 // reportCapturedWrite flags target when it is a direct write to a variable

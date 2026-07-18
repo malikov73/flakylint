@@ -247,8 +247,12 @@ require.Eventually(t, func() bool {
 
 Flags, inside the callback of `assert`/`require` `Eventually`, `Eventuallyf`,
 `Never`, `Neverf`, `EventuallyWithT`, and `EventuallyWithTf` (package-level
-form), a direct write to a captured or package-level variable (`x = ...`, `x++`,
-`x = append(x, ...)`) and any channel send. Stays silent for variables declared
+form), only **count-dependent** effects on a captured or package-level variable
+— increments (`x++`, `x--`), compound assignments (`x += ...`, `x |= ...`), and
+self-appends (`x = append(x, ...)`) — plus any channel send. A plain overwrite
+(`x = v`, including multi-assign `a, b = f()`) is silent: it is last-write-wins,
+the idiomatic way to capture the final successful tick's result, and flagging it
+produced false positives on real code. Stays silent, too, for variables declared
 inside the callback, the blank identifier, and — a deliberate v1 boundary —
 keyed or field writes through a captured map, slice, or pointer (`m[k] = v`,
 `p.f = v`), which are common in idempotent polling. Method calls (HTTP/DB

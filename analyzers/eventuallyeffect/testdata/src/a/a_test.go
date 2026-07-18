@@ -10,9 +10,13 @@ import (
 
 var pkgReady bool
 
+var pkgCount int
+
 func expensive() int { return 42 }
 
-// --- flagged ---------------------------------------------------------------
+func get() (int, error) { return 1, nil }
+
+// --- flagged (count-dependent effects) --------------------------------------
 
 func TestAttempts(t *testing.T) {
 	attempts := 0
@@ -22,18 +26,18 @@ func TestAttempts(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-func TestCapturedAssign(t *testing.T) {
-	state := "pending"
+func TestCompoundAssign(t *testing.T) {
+	total := 0
 	assert.Eventually(t, func() bool {
-		state = "ready" // want `this write to "state" makes test state depend on the poll count`
-		return state == "ready"
+		total += 2 // want `this write to "total" makes test state depend on the poll count`
+		return total > 6
 	}, time.Second, 10*time.Millisecond)
 }
 
 func TestPackageVar(t *testing.T) {
 	assert.Eventually(t, func() bool {
-		pkgReady = true // want `this write to "pkgReady" makes test state depend on the poll count`
-		return pkgReady
+		pkgCount++ // want `this write to "pkgCount" makes test state depend on the poll count`
+		return pkgCount > 3
 	}, time.Second, 10*time.Millisecond)
 }
 
@@ -53,6 +57,15 @@ func TestAppendCaptured(t *testing.T) {
 	}, time.Second, 10*time.Millisecond, "waiting")
 }
 
+func TestAppendVariadic(t *testing.T) {
+	var acc []int
+	extra := []int{1, 2}
+	assert.Eventually(t, func() bool {
+		acc = append(acc, extra...) // want `this write to "acc" makes test state depend on the poll count`
+		return len(acc) > 3
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestNever(t *testing.T) {
 	seen := 0
 	require.Never(t, func() bool {
@@ -63,10 +76,10 @@ func TestNever(t *testing.T) {
 
 func TestNestedSubtest(t *testing.T) {
 	t.Run("sub", func(t *testing.T) {
-		done := false
+		count := 0
 		assert.Eventually(t, func() bool {
-			done = true // want `this write to "done" makes test state depend on the poll count`
-			return done
+			count++ // want `this write to "count" makes test state depend on the poll count`
+			return count > 3
 		}, time.Second, 10*time.Millisecond)
 	})
 }
@@ -81,7 +94,37 @@ func TestNestedGoroutine(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
-// --- silent ----------------------------------------------------------------
+// --- silent -----------------------------------------------------------------
+
+// Plain overwrite: last-write-wins, the idiomatic way to capture the final
+// tick's value. Silent — the deliberate boundary.
+func TestCapturedOverwrite(t *testing.T) {
+	state := "pending"
+	assert.Eventually(t, func() bool {
+		state = "ready"
+		return state == "ready"
+	}, time.Second, 10*time.Millisecond)
+}
+
+// Plain overwrite of a package-level var: also last-write-wins, silent.
+func TestPackageOverwrite(t *testing.T) {
+	assert.Eventually(t, func() bool {
+		pkgReady = true
+		return pkgReady
+	}, time.Second, 10*time.Millisecond)
+}
+
+// The prometheus/prometheus idiom: multi-assign captures the last read, guarded
+// by the returned status, and the result is read after Eventually returns.
+func TestGuardedLastRead(t *testing.T) {
+	var r int
+	var err error
+	require.Eventually(t, func() bool {
+		r, err = get()
+		return err == nil && r > 0
+	}, time.Second, 10*time.Millisecond)
+	_ = r
+}
 
 func TestLocalOnly(t *testing.T) {
 	items := []int{1, 2, 3}
