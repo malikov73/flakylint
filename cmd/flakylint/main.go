@@ -2,6 +2,9 @@
 package main
 
 import (
+	"fmt"
+	"os"
+
 	"golang.org/x/tools/go/analysis/multichecker"
 
 	"github.com/malikov73/flakylint/analyzers/eventuallyeffect"
@@ -12,9 +15,27 @@ import (
 	"github.com/malikov73/flakylint/analyzers/parallelglobal"
 	"github.com/malikov73/flakylint/analyzers/sleepassert"
 	"github.com/malikov73/flakylint/internal/nolint"
+	versionpkg "github.com/malikov73/flakylint/internal/version"
+)
+
+// Build metadata, injected via -ldflags -X by goreleaser. Empty in plain
+// `go build`/`go install` builds, where the version command reconstructs
+// what it can from runtime/debug.ReadBuildInfo.
+var (
+	version string
+	commit  string
+	date    string
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "version", "--version", "-version":
+			fmt.Println(versionpkg.Format(version, commit, date))
+			return
+		}
+	}
+
 	multichecker.Main(
 		nolint.Wrap(eventuallyeffect.Analyzer),
 		nolint.Wrap(exitfatal.Analyzer),
