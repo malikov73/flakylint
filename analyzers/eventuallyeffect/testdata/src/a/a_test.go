@@ -51,6 +51,14 @@ func TestChannelSend(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 }
 
+func TestSelectorChannelSend(t *testing.T) {
+	s := struct{ ch chan int }{ch: make(chan int, 1)}
+	require.Eventually(t, func() bool {
+		s.ch <- 1 // want `this channel send happens once per poll tick`
+		return true
+	}, time.Second, 10*time.Millisecond)
+}
+
 func TestPackageChannelSend(t *testing.T) {
 	require.Eventually(t, func() bool {
 		pkgCh <- 1 // want `this channel send happens once per poll tick`

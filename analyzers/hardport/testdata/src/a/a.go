@@ -16,6 +16,4 @@ func listenProd() {
 	go func() {
 		_ = http.ListenAndServe(":8081", nil)
 	}()
-	srv := &http.Server{Addr: "127.0.0.1:8443"}
-	_ = srv
 }
