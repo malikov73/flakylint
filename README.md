@@ -77,7 +77,7 @@ Some favorites the corpus run surfaced:
 
 ## The checks
 
-[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary) · [`hardport`](#hardport--hardcoded-ports-in-tests)
+[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary) · [`hardport`](#hardport--hardcoded-ports-in-tests) · [`maporder`](#maporder--asserting-on-map-iteration-order)
 
 ### `httptestclose` — leaked httptest servers
 
@@ -185,6 +185,41 @@ Flags `net.Listen` / `net.ListenPacket`, `http.ListenAndServe` /
 named ports (`":http"`), computed addresses (`fmt.Sprintf`), unix sockets,
 the wildcard port `":0"`, and Dial-side literals — those are not the bug.
 
+### `maporder` — asserting on map iteration order
+
+```go
+func TestKeys(t *testing.T) {
+	var got []string
+	for k := range m {
+		got = append(got, k) // ← collected in random order
+	}
+	assert.Equal(t, []string{"a", "b", "c"}, got) // ← flaky
+}
+```
+
+The Go runtime **deliberately** randomizes map iteration order on every run,
+so a slice or string built by ranging over a map has no stable order. An
+order-sensitive assertion against a fixed expected value passes only when the
+random order happens to line up — the test can go green for months and then
+flake for no visible reason. Sort the accumulator first, or assert
+order-insensitively:
+
+```go
+sort.Strings(got)
+assert.Equal(t, []string{"a", "b", "c"}, got)
+// or
+assert.ElementsMatch(t, []string{"a", "b", "c"}, got)
+```
+
+Flags `assert`/`require` `Equal`/`EqualValues`, `reflect.DeepEqual`, and
+`slices.Equal`/`EqualFunc` on a value accumulated in a map-range loop (testify
+in its package-level form). Stays silent when the accumulator is sorted
+(`sort.*`, `slices.Sort*`), asserted order-insensitively (`ElementsMatch`,
+`Len`, `Contains`, `Subset`), or escapes the test — passed to a helper,
+returned, reassigned, address-taken, captured by a nested closure, or mixed
+with appends from outside the loop. No autofix: choosing between sorting and
+`ElementsMatch` is a semantic call only the author can make.
+
 ## Install
 
 ```
@@ -246,8 +281,9 @@ time.Sleep(10 * time.Millisecond) //nolint:sleepassert // waiting on a real sock
 ```
 
 The name after the colon is the check name (`httptestclose`, `sleepassert`,
-`parallelglobal`, `exitfatal`, `hardport`); list several comma-separated to
-silence more than one. A bare `//nolint` suppresses every check on that line.
+`parallelglobal`, `exitfatal`, `hardport`, `maporder`); list several
+comma-separated to silence more than one. A bare `//nolint` suppresses every
+check on that line.
 
 ## Design philosophy
 
@@ -263,7 +299,6 @@ tools — flakylint prevents the patterns those tools would later catch.
 
 ## Roadmap
 
-- map-iteration-order dependent assertions
 - side effects inside `require.Eventually` / polling callbacks
 - `time.Now()` used as an expected value in assertions
 - static goroutine-leak check (complementing runtime [goleak](https://github.com/uber-go/goleak))
