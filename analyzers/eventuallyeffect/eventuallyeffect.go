@@ -21,7 +21,8 @@
 //     captured local or a package-level var): x++, x--;
 //   - a compound assignment to such a variable: x += ..., x |= ..., etc.;
 //   - a self-append that grows such a variable: x = append(x, ...);
-//   - a channel send: ch <- v.
+//   - a send on such a channel: ch <- v. A send on a channel declared inside
+//     the callback stays silent, since it never escapes a single tick.
 //
 // A plain overwrite (x = v, including multi-assign a, b = f()) is silent. It is
 // last-write-wins: re-running it each tick leaves the same final value, so it
@@ -125,7 +126,7 @@ func checkCondition(pass *analysis.Pass, lit *ast.FuncLit) {
 	ast.Inspect(lit.Body, func(n ast.Node) bool {
 		switch st := n.(type) {
 		case *ast.SendStmt:
-			pass.Reportf(st.Pos(), sendMsg)
+			reportChannelSend(pass, lit, st)
 		case *ast.IncDecStmt:
 			reportCapturedWrite(pass, lit, st.X)
 		case *ast.AssignStmt:
@@ -188,6 +189,21 @@ func isSelfAppend(info *types.Info, lhs, rhs ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// reportChannelSend flags a channel send unless the channel resolves to a
+// variable declared inside the callback. A callback-local channel (ch :=
+// make(...); ch <- v) never escapes a single tick, so the send is local
+// bookkeeping; a captured or package-level channel carries state out of the
+// callback and stays flagged. A non-ident channel expression cannot be proven
+// local, so it is flagged conservatively.
+func reportChannelSend(pass *analysis.Pass, lit *ast.FuncLit, st *ast.SendStmt) {
+	if id, ok := st.Chan.(*ast.Ident); ok {
+		if v, ok := pass.TypesInfo.ObjectOf(id).(*types.Var); ok && declaredInside(lit, v) {
+			return
+		}
+	}
+	pass.Reportf(st.Pos(), sendMsg)
 }
 
 // reportCapturedWrite flags target when it is a direct write to a variable

@@ -257,7 +257,9 @@ Flags, inside the callback of `assert`/`require` `Eventually`, `Eventuallyf`,
 `Never`, `Neverf`, `EventuallyWithT`, and `EventuallyWithTf` (package-level
 form), only **count-dependent** effects on a captured or package-level variable
 — increments (`x++`, `x--`), compound assignments (`x += ...`, `x |= ...`), and
-self-appends (`x = append(x, ...)`) — plus any channel send. A plain overwrite
+self-appends (`x = append(x, ...)`) — plus a send on a captured or package-level
+channel. A send on a channel created inside the callback (`ch := make(...); ch
+<- v`) never escapes a single tick and stays silent. A plain overwrite
 (`x = v`, including multi-assign `a, b = f()`) is silent: it is last-write-wins,
 the idiomatic way to capture the final successful tick's result, and flagging it
 produced false positives on real code. Stays silent, too, for variables declared

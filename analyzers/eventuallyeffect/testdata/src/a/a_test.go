@@ -12,6 +12,8 @@ var pkgReady bool
 
 var pkgCount int
 
+var pkgCh = make(chan int, 1)
+
 func expensive() int { return 42 }
 
 func get() (int, error) { return 1, nil }
@@ -45,6 +47,13 @@ func TestChannelSend(t *testing.T) {
 	ch := make(chan struct{}, 1)
 	require.Eventually(t, func() bool {
 		ch <- struct{}{} // want `this channel send happens once per poll tick`
+		return true
+	}, time.Second, 10*time.Millisecond)
+}
+
+func TestPackageChannelSend(t *testing.T) {
+	require.Eventually(t, func() bool {
+		pkgCh <- 1 // want `this channel send happens once per poll tick`
 		return true
 	}, time.Second, 10*time.Millisecond)
 }
@@ -182,6 +191,16 @@ func TestNotEventually(t *testing.T) {
 	}
 	inc()
 	_ = attempts
+}
+
+// A channel created inside the callback never escapes a single tick, so the
+// send is local bookkeeping — silent (review counterexample).
+func TestLocalChannelSend(t *testing.T) {
+	require.Eventually(t, func() bool {
+		ch := make(chan int, 1)
+		ch <- 1
+		return <-ch == 1
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestOutsideCallback(t *testing.T) {
