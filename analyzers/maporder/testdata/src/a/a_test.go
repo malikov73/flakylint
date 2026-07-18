@@ -1,0 +1,203 @@
+package a
+
+import (
+	"reflect"
+	"slices"
+	"sort"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+)
+
+func normalize(s []string) []string { return s }
+
+// --- flagged ---------------------------------------------------------------
+
+func TestClassicKeys(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.Equal(t, []string{"a", "b"}, got) // want `assertion depends on map iteration order`
+}
+
+func TestValues(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []int
+	for _, v := range m {
+		got = append(got, v)
+	}
+	require.Equal(t, []int{1, 2}, got) // want `assertion depends on map iteration order`
+}
+
+func TestAccFirstArg(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.Equal(t, got, []string{"a"}) // want `assertion depends on map iteration order`
+}
+
+func TestStringAccum(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	s := ""
+	for k := range m {
+		s += k
+	}
+	assert.Equal(t, "ab", s) // want `assertion depends on map iteration order`
+}
+
+func TestReflectDeepEqual(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	if !reflect.DeepEqual(got, []string{"a"}) { // want `assertion depends on map iteration order`
+		t.Errorf("mismatch")
+	}
+}
+
+func TestSlicesEqual(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	if !slices.Equal([]string{"a"}, got) { // want `assertion depends on map iteration order`
+		t.Error("mismatch")
+	}
+}
+
+func TestSubtest(t *testing.T) {
+	t.Run("sub", func(t *testing.T) {
+		m := map[string]int{"a": 1}
+		var got []string
+		for k := range m {
+			got = append(got, k)
+		}
+		assert.Equal(t, []string{"a"}, got) // want `assertion depends on map iteration order`
+	})
+}
+
+// --- silent ----------------------------------------------------------------
+
+func TestSortStrings(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	sort.Strings(got)
+	assert.Equal(t, []string{"a", "b"}, got)
+}
+
+func TestSlicesSort(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	slices.Sort(got)
+	assert.Equal(t, []string{"a", "b"}, got)
+}
+
+func TestSortAfterAssert(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.Equal(t, []string{"a", "b"}, got) // documented approximation: sort after the assert still silences
+	sort.Strings(got)
+	_ = got
+}
+
+func TestElementsMatch(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.ElementsMatch(t, []string{"a", "b"}, got)
+}
+
+func TestLen(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.Len(t, got, 2)
+}
+
+func TestEscapeHelper(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	_ = normalize(got)
+	assert.Equal(t, []string{"a"}, got)
+}
+
+func TestEscapeReassign(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	other := got
+	_ = other
+	assert.Equal(t, []string{"a"}, got)
+}
+
+func TestEscapeAddr(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	_ = &got
+	assert.Equal(t, []string{"a"}, got)
+}
+
+func TestRangeSlice(t *testing.T) {
+	src := []string{"a", "b"}
+	var got []string
+	for _, v := range src {
+		got = append(got, v)
+	}
+	assert.Equal(t, []string{"a", "b"}, got)
+}
+
+func TestNoAssert(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	_ = got
+}
+
+func TestMixedProvenance(t *testing.T) {
+	m := map[string]int{"a": 1}
+	var got []string
+	got = append(got, "x")
+	for k := range m {
+		got = append(got, k)
+	}
+	assert.Equal(t, []string{"x", "a"}, got)
+}
+
+func TestSumNotStringAccum(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	sum := 0
+	for _, v := range m {
+		sum += v
+	}
+	assert.Equal(t, 3, sum)
+}
