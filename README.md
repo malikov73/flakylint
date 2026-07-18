@@ -64,6 +64,9 @@ Broken out by check:
 `parallelglobal` produced no findings on the corpus — the pattern is rare in
 mature codebases, which is exactly why it survives review when it does appear.
 
+`hardport` is new in v0.2.0 and is not yet part of these published numbers;
+the corpus is refreshed before the v0.2.0 tag.
+
 Some favorites the corpus run surfaced:
 
 - a Grafana test sleeping through an async DB insert, annotated by its own
@@ -74,7 +77,7 @@ Some favorites the corpus run surfaced:
 
 ## The checks
 
-[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary)
+[`httptestclose`](#httptestclose--leaked-httptest-servers) · [`sleepassert`](#sleepassert--sleeping-instead-of-synchronizing) · [`parallelglobal`](#parallelglobal--parallel-tests-sharing-package-state) · [`exitfatal`](#exitfatal--killing-the-test-binary) · [`hardport`](#hardport--hardcoded-ports-in-tests)
 
 ### `httptestclose` — leaked httptest servers
 
@@ -155,6 +158,33 @@ skip.
 
 **Autofix** (`-fix`): rewrites `log.Fatal*` → `t.Fatal*`.
 
+### `hardport` — hardcoded ports in tests
+
+```go
+func TestServer(t *testing.T) {
+	ln, _ := net.Listen("tcp", ":8080") // ← fixed port, taken under parallelism
+	// ...
+}
+```
+
+A test that binds a fixed, non-zero port is a bet that nothing else on the
+host wants it. It loses when `go test -p` runs package tests in parallel,
+when several CI jobs share a runner, or when a leaked process from an earlier
+run still holds the port — and the failure looks like a flake, not a bug. The
+fix is to listen on `":0"` and read the real address back:
+
+```go
+ln, _ := net.Listen("tcp", ":0")
+addr := ln.Addr().String() // ← kernel-assigned free port
+```
+
+or let `httptest.NewServer` pick the port for you.
+
+Flags `net.Listen` / `net.ListenPacket`, `http.ListenAndServe` /
+`ListenAndServeTLS`, and `http.Server{Addr: ...}` literals. Stays silent for
+named ports (`":http"`), computed addresses (`fmt.Sprintf`), unix sockets,
+the wildcard port `":0"`, and Dial-side literals — those are not the bug.
+
 ## Install
 
 ```
@@ -216,8 +246,8 @@ time.Sleep(10 * time.Millisecond) //nolint:sleepassert // waiting on a real sock
 ```
 
 The name after the colon is the check name (`httptestclose`, `sleepassert`,
-`parallelglobal`, `exitfatal`); list several comma-separated to silence more
-than one. A bare `//nolint` suppresses every check on that line.
+`parallelglobal`, `exitfatal`, `hardport`); list several comma-separated to
+silence more than one. A bare `//nolint` suppresses every check on that line.
 
 ## Design philosophy
 
@@ -234,7 +264,6 @@ tools — flakylint prevents the patterns those tools would later catch.
 ## Roadmap
 
 - map-iteration-order dependent assertions
-- hardcoded listen ports in tests (`:8080` → `:0`)
 - side effects inside `require.Eventually` / polling callbacks
 - `time.Now()` used as an expected value in assertions
 - static goroutine-leak check (complementing runtime [goleak](https://github.com/uber-go/goleak))
