@@ -83,6 +83,19 @@ func TestSubtest(t *testing.T) {
 	})
 }
 
+// An accumulator declared OUTSIDE the map range but appended via an inner
+// slice-range loop still interleaves across map iterations, so it must flag.
+func TestOuterAccInnerSliceRange(t *testing.T) {
+	byGroup := map[string][]string{"g1": {"a", "b"}, "g2": {"c"}}
+	var got []string
+	for _, uids := range byGroup {
+		for _, uid := range uids {
+			got = append(got, uid)
+		}
+	}
+	assert.Equal(t, []string{"a", "b", "c"}, got) // want `assertion depends on map iteration order`
+}
+
 // --- silent ----------------------------------------------------------------
 
 func TestSortStrings(t *testing.T) {
@@ -191,6 +204,21 @@ func TestMixedProvenance(t *testing.T) {
 		got = append(got, k)
 	}
 	assert.Equal(t, []string{"x", "a"}, got)
+}
+
+// Per-group accumulators declared inside the map-range body are fresh on every
+// iteration, so their internal order cannot depend on map iteration order. The
+// map range only picks which group is asserted; the order comes from ranging
+// the slice value. (Regression: grafana schedule_unit_test.go:650.)
+func TestPerIterationAccumulator(t *testing.T) {
+	byGroup := map[string][]string{"g1": {"a", "b"}, "g2": {"c"}}
+	for _, uids := range byGroup {
+		var got []string
+		for _, uid := range uids {
+			got = append(got, uid)
+		}
+		assert.Equal(t, uids, got)
+	}
 }
 
 func TestSumNotStringAccum(t *testing.T) {

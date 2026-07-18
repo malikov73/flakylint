@@ -257,6 +257,14 @@ func collectAccumulators(info *types.Info, body *ast.BlockStmt) (fromMap, outsid
 			return true
 		}
 		eachAccWrite(info, rs.Body, func(obj types.Object, assign *ast.AssignStmt, _ *ast.Ident) {
+			// An accumulator declared inside the map-range statement (including
+			// its body) is fresh on every iteration, so its internal order
+			// cannot depend on map iteration order — even when it is appended by
+			// ranging over an inner slice. Only accumulators declared outside
+			// the map range carry order across iterations.
+			if obj.Pos() >= rs.Pos() && obj.Pos() < rs.End() {
+				return
+			}
 			fromMap[obj] = true
 			inMapWrite[assign] = true
 		})
