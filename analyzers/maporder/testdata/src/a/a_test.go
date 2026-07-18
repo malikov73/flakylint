@@ -118,15 +118,39 @@ func TestSlicesSort(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, got)
 }
 
+// A sort silences only assertions positioned after it. Here the assert runs on
+// the still-unsorted accumulator, so it flakes; the later sort is irrelevant.
 func TestSortAfterAssert(t *testing.T) {
 	m := map[string]int{"a": 1, "b": 2}
 	var got []string
 	for k := range m {
 		got = append(got, k)
 	}
-	assert.Equal(t, []string{"a", "b"}, got) // documented approximation: sort after the assert still silences
+	assert.Equal(t, []string{"a", "b"}, got) // want `assertion depends on map iteration order`
 	sort.Strings(got)
-	_ = got
+}
+
+// The assert reads the accumulator before the map-range loop fills it, so its
+// value cannot depend on iteration order — silent (review counterexample).
+func TestAssertBeforeLoop(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	assert.Equal(t, []string{"a", "b"}, got)
+	for k := range m {
+		got = append(got, k)
+	}
+}
+
+// The accumulator appears only as a testify message argument (index > 2), which
+// is message-only, not an order-sensitive comparison — silent.
+func TestAccInMsgArgsOnly(t *testing.T) {
+	m := map[string]int{"a": 1, "b": 2}
+	var got []string
+	for k := range m {
+		got = append(got, k)
+	}
+	n := len(got)
+	assert.Equal(t, 2, n, "accumulated %v", got)
 }
 
 func TestElementsMatch(t *testing.T) {

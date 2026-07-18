@@ -221,12 +221,16 @@ assert.ElementsMatch(t, []string{"a", "b", "c"}, got)
 
 Flags `assert`/`require` `Equal`/`EqualValues`, `reflect.DeepEqual`, and
 `slices.Equal`/`EqualFunc` on a value accumulated in a map-range loop (testify
-in its package-level form). Stays silent when the accumulator is sorted
-(`sort.*`, `slices.Sort*`), asserted order-insensitively (`ElementsMatch`,
-`Len`, `Contains`, `Subset`), or escapes the test — passed to a helper,
-returned, reassigned, address-taken, captured by a nested closure, or mixed
-with appends from outside the loop. No autofix: choosing between sorting and
-`ElementsMatch` is a semantic call only the author can make.
+in its package-level form). The check is source-order aware: an assertion is
+flagged only when it runs **after** the map-range loop that fills the
+accumulator, and a `sort.*`/`slices.Sort*` call silences only the assertions
+that follow it — a sort placed after the assertion does not help. Stays silent
+when the accumulator is sorted before the assertion, asserted order-insensitively
+(`ElementsMatch`, `Len`, `Contains`, `Subset`), used only as a testify message
+argument, or escapes the test — passed to a helper, returned, reassigned,
+address-taken, captured by a nested closure, or mixed with appends from outside
+the loop. No autofix: choosing between sorting and `ElementsMatch` is a semantic
+call only the author can make.
 
 ### `eventuallyeffect` — side effects in polling callbacks
 

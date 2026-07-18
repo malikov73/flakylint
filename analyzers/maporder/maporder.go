@@ -16,6 +16,15 @@
 // as an escape and silences the finding. testify calls are matched only in
 // their package-level form (assert.Equal(t, ...)), not the require.New(t)
 // method form.
+//
+// Classification is source-order aware for the two position-dependent cases:
+// an assertion is reported only when it is positioned after the map-range loop
+// that fills the accumulator (an assertion before the loop reads a
+// pre-accumulation value), and a sort silences only the assertions that follow
+// it. Escapes and order-insensitive assertions are order-independent kill
+// switches — a single such use anywhere silences the finding, conservatively.
+// An accumulator appearing only in a testify msgAndArgs position (after the
+// expected/actual pair) is a message, not a compared value, and is ignored.
 package maporder
 
 import (
@@ -105,7 +114,7 @@ func run(pass *analysis.Pass) (any, error) {
 func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 	info := pass.TypesInfo
 
-	fromMap, outside, writeLHS := collectAccumulators(info, body)
+	fromMap, accEnd, outside, writeLHS := collectAccumulators(info, body)
 	declared := declaredObjects(info, body)
 
 	candidate := map[types.Object]bool{}
@@ -119,10 +128,13 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 	}
 
 	benign := writeLHS // accumulator write targets are part of the accumulation
-	sorted := map[types.Object]bool{}
+	// sortPos records the earliest sort of each accumulator; a sort silences
+	// only assertions positioned after it. insensitive and escaped are
+	// order-independent kill switches — a use anywhere silences the finding.
+	sortPos := map[types.Object]token.Pos{}
 	insensitive := map[types.Object]bool{}
 	escaped := map[types.Object]bool{}
-	sensitive := map[types.Object]*ast.CallExpr{}
+	sensitive := map[types.Object][]*ast.CallExpr{}
 
 	// Pass 1: classify every call, and treat any capture of an accumulator by a
 	// nested function literal as an escape.
@@ -138,6 +150,10 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 			return false
 		case *ast.CallExpr:
 			kind := classify(info, node)
+			if kind == kindSensitive {
+				classifySensitive(info, node, candidate, benign, sensitive)
+				return true
+			}
 			for _, arg := range node.Args {
 				id, ok := arg.(*ast.Ident)
 				if !ok {
@@ -149,15 +165,12 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 				}
 				switch kind {
 				case kindSort:
-					sorted[obj] = true
+					if pos, ok := sortPos[obj]; !ok || node.Pos() < pos {
+						sortPos[obj] = node.Pos()
+					}
 					benign[id] = true
 				case kindInsensitive:
 					insensitive[obj] = true
-					benign[id] = true
-				case kindSensitive:
-					if sensitive[obj] == nil {
-						sensitive[obj] = node
-					}
 					benign[id] = true
 				case kindBuiltin:
 					benign[id] = true
@@ -185,12 +198,66 @@ func checkUnit(pass *analysis.Pass, body *ast.BlockStmt) {
 		return true
 	})
 
-	for obj, call := range sensitive {
-		if sorted[obj] || insensitive[obj] || escaped[obj] {
+	for obj, calls := range sensitive {
+		if insensitive[obj] || escaped[obj] {
 			continue
 		}
-		pass.Report(analysis.Diagnostic{Pos: call.Pos(), End: call.End(), Message: msg})
+		for _, call := range calls {
+			// The assertion must observe the accumulated value: one positioned
+			// before the map-range loop reads a pre-accumulation value that
+			// cannot depend on iteration order.
+			if call.Pos() < accEnd[obj] {
+				continue
+			}
+			// A sort earlier in the source gives the accumulator a stable order
+			// before this assertion; a later sort does not.
+			if pos, ok := sortPos[obj]; ok && pos < call.Pos() {
+				continue
+			}
+			pass.Report(analysis.Diagnostic{Pos: call.Pos(), End: call.End(), Message: msg})
+		}
 	}
+}
+
+// classifySensitive records an order-sensitive assertion for each accumulator
+// it compares. For testify Equal-family calls, an accumulator appearing only in
+// the trailing msgAndArgs positions (index > 2) is a message, not a compared
+// value: it is marked benign so it does not read as an escape, but it does not
+// make the assertion order-sensitive. Every accumulator argument of the call is
+// marked benign.
+func classifySensitive(info *types.Info, call *ast.CallExpr, candidate map[types.Object]bool, benign map[*ast.Ident]bool, sensitive map[types.Object][]*ast.CallExpr) {
+	msgStart := msgArgsStart(info, call)
+	for i, arg := range call.Args {
+		id, ok := arg.(*ast.Ident)
+		if !ok {
+			continue
+		}
+		obj := info.Uses[id]
+		if !candidate[obj] {
+			continue
+		}
+		benign[id] = true
+		if msgStart >= 0 && i >= msgStart {
+			continue // message-only argument, not a compared value
+		}
+		if last := sensitive[obj]; len(last) == 0 || last[len(last)-1] != call {
+			sensitive[obj] = append(sensitive[obj], call)
+		}
+	}
+}
+
+// msgArgsStart returns the argument index at which testify's variadic
+// msgAndArgs begins for an Equal-family assertion (after t, expected, actual),
+// or -1 for a stdlib sensitive call, which has no message arguments.
+func msgArgsStart(info *types.Info, call *ast.CallExpr) int {
+	for _, p := range testifyPkgs {
+		for _, name := range sensitiveTestify {
+			if testfuncs.IsPkgFunc(info, call, p, name) {
+				return 3
+			}
+		}
+	}
+	return -1
 }
 
 type callKind int
@@ -239,11 +306,14 @@ func classify(info *types.Info, call *ast.CallExpr) callKind {
 }
 
 // collectAccumulators finds the accumulators written inside map-range loops
-// (fromMap), those also written outside any map-range loop (outside — mixed
+// (fromMap), the position at which each one's accumulation completes (accEnd,
+// the end of the map-range loop that fills it — the latest such loop when there
+// are several), those also written outside any map-range loop (outside — mixed
 // provenance), and the set of accumulator-write target identifiers (writeLHS),
 // which belong to the accumulation and must not be read as escapes.
-func collectAccumulators(info *types.Info, body *ast.BlockStmt) (fromMap, outside map[types.Object]bool, writeLHS map[*ast.Ident]bool) {
+func collectAccumulators(info *types.Info, body *ast.BlockStmt) (fromMap map[types.Object]bool, accEnd map[types.Object]token.Pos, outside map[types.Object]bool, writeLHS map[*ast.Ident]bool) {
 	fromMap = map[types.Object]bool{}
+	accEnd = map[types.Object]token.Pos{}
 	outside = map[types.Object]bool{}
 	writeLHS = map[*ast.Ident]bool{}
 
@@ -266,6 +336,9 @@ func collectAccumulators(info *types.Info, body *ast.BlockStmt) (fromMap, outsid
 				return
 			}
 			fromMap[obj] = true
+			if rs.End() > accEnd[obj] {
+				accEnd[obj] = rs.End()
+			}
 			inMapWrite[assign] = true
 		})
 		return true
@@ -277,7 +350,7 @@ func collectAccumulators(info *types.Info, body *ast.BlockStmt) (fromMap, outsid
 			outside[obj] = true
 		}
 	})
-	return fromMap, outside, writeLHS
+	return fromMap, accEnd, outside, writeLHS
 }
 
 // eachAccWrite calls fn for every accumulator write directly inside node
