@@ -40,6 +40,23 @@ func BenchmarkExit(b *testing.B) {
 	os.Exit(1) // want `os.Exit inside a test terminates the whole test binary and skips cleanup; use b.Fatal or b.Skip`
 }
 
+func TestShadowed(t *testing.T) {
+	{
+		t := 1
+		_ = t
+		// t is shadowed by an int here, so no t.Fatal drop-in is named and no fix is offered.
+		log.Fatal("boom") // want `route the failure through the test's`
+	}
+}
+
+func TestShadowedExit(t *testing.T) {
+	{
+		t := 1
+		_ = t
+		os.Exit(1) // want `route the failure through the test's`
+	}
+}
+
 func helper() {
 	os.Exit(1) // not a test function: silent
 }

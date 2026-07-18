@@ -9,6 +9,8 @@ package exitfatal
 import (
 	"fmt"
 	"go/ast"
+	"go/token"
+	"go/types"
 
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
@@ -69,18 +71,26 @@ func run(pass *analysis.Pass) (any, error) {
 				return true
 			}
 		}
-		reportInTest := func(tname string) {
+		// reportInTest flags a call inside a test body or subtest. When the
+		// receiver name no longer resolves to the testing parameter at the call
+		// site (e.g. a local `t := 1` shadows it), pointing the fix at t.Fatal
+		// would rewrite the call against the wrong object, so drop the fix and
+		// use wording that does not name the shadowed receiver.
+		reportInTest := func(param *ast.Ident) {
+			tname := param.Name
+			shadowed := tname != "_" &&
+				!resolvesToParam(pass, tname, pass.TypesInfo.Defs[param], call.Pos())
 			if isExit {
-				reportExit(pass, call, tname)
+				reportExit(pass, call, tname, shadowed)
 			} else {
-				reportLogFatal(pass, call, logName, tname)
+				reportLogFatal(pass, call, logName, tname, shadowed)
 			}
 		}
 		for i := len(stack) - 2; i >= 0; i-- {
 			switch outer := stack[i].(type) {
 			case *ast.FuncDecl:
 				if param, ok := testfuncs.TestFunc(pass.TypesInfo, outer); ok {
-					reportInTest(param.Name)
+					reportInTest(param)
 				} else if testMainDefer[outer] {
 					reportTestMain(pass, call, isExit, logName)
 				}
@@ -89,7 +99,7 @@ func run(pass *analysis.Pass) (any, error) {
 				if i > 0 {
 					if parent, ok := stack[i-1].(*ast.CallExpr); ok {
 						if _, param, ok := testfuncs.SubtestLit(pass.TypesInfo, parent); ok {
-							reportInTest(param.Name)
+							reportInTest(param)
 						}
 					}
 				}
@@ -110,16 +120,43 @@ func receiver(tname string) string {
 	return tname
 }
 
+// resolvesToParam reports whether name still resolves to the testing parameter
+// param at pos. It returns false when a nearer declaration shadows the
+// parameter, so callers can suppress a fix that would target the wrong object.
+func resolvesToParam(pass *analysis.Pass, name string, param types.Object, pos token.Pos) bool {
+	if param == nil {
+		return false
+	}
+	inner := pass.Pkg.Scope().Innermost(pos)
+	if inner == nil {
+		return false
+	}
+	_, obj := inner.LookupParent(name, pos)
+	return obj == param
+}
+
 // reportExit flags an os.Exit call inside a test body or subtest.
-func reportExit(pass *analysis.Pass, call *ast.CallExpr, tname string) {
+func reportExit(pass *analysis.Pass, call *ast.CallExpr, tname string, shadowed bool) {
+	if shadowed {
+		pass.Reportf(call.Pos(),
+			"os.Exit inside a test terminates the whole test binary and skips cleanup; route the failure through the test's *testing.T")
+		return
+	}
 	recv := receiver(tname)
 	pass.Reportf(call.Pos(),
 		"os.Exit inside a test terminates the whole test binary and skips cleanup; use %s.Fatal or %s.Skip", recv, recv)
 }
 
 // reportLogFatal flags a log.Fatal* call inside a test body or subtest and,
-// when the receiver has a usable name, offers to rewrite it to the t.Fatal* form.
-func reportLogFatal(pass *analysis.Pass, call *ast.CallExpr, logName, tname string) {
+// when the receiver has a usable name and is not shadowed, offers to rewrite
+// it to the t.Fatal* form.
+func reportLogFatal(pass *analysis.Pass, call *ast.CallExpr, logName, tname string, shadowed bool) {
+	if shadowed {
+		pass.Reportf(call.Pos(),
+			"log.%s inside a test terminates the whole test binary and skips cleanup; route the failure through the test's *testing.T",
+			logName)
+		return
+	}
 	diag := analysis.Diagnostic{
 		Pos: call.Pos(),
 		End: call.End(),

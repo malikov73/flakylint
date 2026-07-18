@@ -17,3 +17,11 @@ func BenchmarkFix(b *testing.B) {
 func TestNoName(_ *testing.T) {
 	log.Fatal("bad") // want `log.Fatal inside a test terminates the whole test binary`
 }
+
+func TestShadowed(t *testing.T) {
+	{
+		t := 1
+		_ = t
+		log.Fatal("bad") // want `route the failure through the test's`
+	}
+}
